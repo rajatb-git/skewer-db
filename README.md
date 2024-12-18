@@ -1,6 +1,9 @@
 # skewer-db
 
-A tiny custom JSON document-based db that leverages the structural and schema validation advantages of Mongoose while maintaining the simplicity of MongoDB commands
+## Why Skewer DB?
+The market has a lot of databases with a lot of support that you can use, SkewerDB tackles a niche use case for small scale setups where you need a db to store minimal information or just use it for local projects.
+All the the small document based (no server) dbs currently come with a learning curve, SkewerDB takes advantage of commands from mongoose and mongodb. SkewerDB uses the same schema validation and declarations setup of mongoose and similar commands to mongodb thereby reducing the learning and setup time.
+The data store resides locally in disk.
 
 ## Installation
 
