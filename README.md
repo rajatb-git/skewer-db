@@ -1,9 +1,20 @@
 # skewer-db
 
-## Why Skewer DB?
-The market has a lot of databases with a lot of support that you can use, SkewerDB tackles a niche use case for small scale setups where you need a db to store minimal information or just use it for local projects.
-All the the small document based (no server) dbs currently come with a learning curve, SkewerDB takes advantage of commands from mongoose and mongodb. SkewerDB uses the same schema validation and declarations setup of mongoose and similar commands to mongodb thereby reducing the learning and setup time.
-The data store resides locally in disk.
+[CONTRIBUTING](https://github.com/rajatb-git/skewer-db/blob/main/CONTRIBUTING.md) |
+[Code of Conduct](https://github.com/rajatb-git/skewer-db/blob/main/CODE_OF_CONDUCT.md) |
+[CHANGELOG](https://github.com/rajatb-git/skewer-db/blob/main/CHANGELOG.md)
+
+A lightweight, document-based database for small-scale projects and local development.  Leveraging familiar Mongoose/MongoDB paradigms for easy setup and usage. Data is stored locally on disk.
+
+## Why SkewerDB?
+
+Need a simple database for a small project or local development?  Tired of the overhead and learning curve associated with other document databases? SkewerDB offers a streamlined solution, utilizing the familiar schema validation and command structure of Mongoose and MongoDB. This minimizes setup time and allows developers to get started quickly.
+
+* **Lightweight:** Minimal dependencies and overhead.
+* **Easy to Learn:**  Uses Mongoose/MongoDB-like syntax and commands.
+* **Local Storage:** Data is persisted locally on disk.
+* **Fast Setup:**  Get up and running in minutes.
+* **Schema Validation:** Ensure data integrity with Mongoose-style schemas.
 
 ## Installation
 
@@ -12,59 +23,74 @@ Using npm:
 $ npm i --save skewer-db
 ```
 
-## Available methods
-| **Method**     | **Description**                                                          |
-| -------------- | ------------------------------------------------------------------------ |
-| getAllRecords  | Gets all records from DB                                                 |
-| findById       | Locates a record by id and returns it                                    |
-| findByKey      | Locates a record using a key value pair                                  |
-| findByTwoKeys  | Locates a record using 2 key value pairs                                 |
-| validateSchema | Validates the record against schema and throws error if validation fails |
-| insertOne      | Inserts a single record                                                  |
-| insertMany     | Inserts multiple records                                                 |
-| updateById     | Finds a record by id and updates it                                      |
-| insertOrUpdate | Will update and existing record or insert a new one                      |
-| deleteById     | Searches for a record by id and deletes it                               |
-| deleteAll      | Deletes all records in a collection                                      |
-
 ## Usage
 
-### 1. Create a model file with the schema
+### 1. Define Your Schema and Model
 ```ts
 import { ISkewerModel, SkewerModel, SchemaType } from 'skewer-db';
 
-export interface IUser {
+interface IUser {
   userId: string;
   name: string;
 }
 
-export const UserSchema: SchemaType = {
+const UserSchema: SchemaType = {
   userId: { type: String, required: true },
   name: { type: String, required: true },
 };
 
-export interface IUserModel extends IUser, ISkewerModel {}
+interface IUserModel extends IUser, ISkewerModel {}
 
-export const UserModel = () => new SkewerModel<IUserModel>('users', UserSchema);
+const UserModel = () => new SkewerModel<IUserModel>('users', UserSchema);
 ```
 
-### 2. Use the model to perform db operations
+### 2. Perform Database Operations
 ```ts
-import UserModel
+import UserModel from './user-model'; // Import your model
 
 const userModel = UserModel();
-const record = {userId: "jd", name: "J Doe"};
-try {
-    console.log(UserModel().insertOne(record));
-    // {
-    //   userId: 'jd',
-    //   name: 'J Doe',
-    //   id: 'ec56dbe8-d244-49af-86d6-354fa7c23c1f',
-    //   createdAt: '2024-12-17T19:42:09.200Z',
-    //   updatedAt: '2024-12-17T19:42:09.200Z'
-    // }
-} catch(error) {
-    console.log(error.message);
-}
+const record = { userId: 'jd', name: 'J Doe' };
 
+try {
+  const newRecord = userModel.insertOne(record);
+  console.log(newRecord);
+  // Expected Output:
+  // {
+  //   userId: 'jd',
+  //   name: 'J Doe',
+  //   id: 'some-generated-uuid',
+  //   createdAt: '2024-12-17T19:42:09.200Z',
+  //   updatedAt: '2024-12-17T19:42:09.200Z'
+  // }
+
+
+  const foundUser = userModel.findById(newRecord.id)
+  console.log(foundUser)
+  // Expected Output: Same as above
+
+
+  const allUsers = userModel.getAllRecords()
+  console.log(allUsers)
+  // Expected Output: An array with the user objects
+
+
+
+} catch (error) {
+  console.error(error.message);
+}
 ```
+
+## Available methods
+| **Method**                                | **Description**                                       |
+| ----------------------------------------- | ----------------------------------------------------- |
+| getAllRecords()                           | Retrieves all records from the collection.            |
+| findById(id)                              | Retrieves a record by its ID.                         |
+| findByKey(key, value)                     | Retrieves records matching a specific key-value pair. |
+| findByTwoKeys(key1, value1, key2, value2) | Retrieves records matching two key-value pairs.       |
+| insertOne(record)                         | Inserts a single record.                              |
+| insertMany(records)                       | Inserts multiple records.                             |
+| updateById(id, updates)                   | Updates a record by its ID.                           |
+| insertOrUpdate(record)                    | Updates an existing record or inserts a new one.      |
+| deleteById(id)                            | Deletes a record by its ID.                           |
+| deleteAll()                               | Deletes all records from the collection.              |
+| validateSchema(record)                    | Validates a record against the schema.                |
