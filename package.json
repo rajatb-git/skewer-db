@@ -5,7 +5,6 @@
   "homepage": "https://github.com/rajatb-git/skewer-db#readme",
   "author": "Rajat Bansal",
   "license": "MIT",
-  "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "engines": {
