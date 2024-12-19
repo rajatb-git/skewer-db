@@ -1,11 +1,9 @@
 {
   "compilerOptions": {
-    "target": "es6",
+    "target": "es2017",
     "module": "commonjs",
     "declaration": true,
-    "outDir": "dist",
-    "strict": true,
-    "esModuleInterop": true
+    "outDir": "dist"
   },
-  "exclude": ["node_modules", "dist", "example"]
+  "include": ["src"]
 }

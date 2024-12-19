@@ -29,19 +29,19 @@ $ npm i --save skewer-db
 ```ts
 import { ISkewerModel, SkewerModel, SchemaType } from 'skewer-db';
 
-interface IUser {
+export interface IUser {
   userId: string;
   name: string;
 }
 
-const UserSchema: SchemaType = {
+export const UserSchema: SchemaType = {
   userId: { type: String, required: true },
   name: { type: String, required: true },
 };
 
-interface IUserModel extends IUser, ISkewerModel {}
+export interface IUserModel extends IUser, ISkewerModel {}
 
-const UserModel = () => new SkewerModel<IUserModel>('users', UserSchema);
+export const UserModel = () => new SkewerModel<IUserModel>('users', UserSchema);
 ```
 
 ### 2. Perform Database Operations

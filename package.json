@@ -2,11 +2,6 @@
   "name": "skewer-db",
   "version": "1.0.0",
   "description": "A tiny custom JSON document-based db that leverages the structural and schema validation advantages of Mongoose while maintaining the simplicity of MongoDB commands",
-  "keywords": [
-    "database",
-    "db",
-    "skewer"
-  ],
   "homepage": "https://github.com/rajatb-git/skewer-db#readme",
   "author": "Rajat Bansal",
   "license": "MIT",
@@ -17,14 +12,16 @@
     "node": ">=16.0.0"
   },
   "scripts": {
+    "test": "mocha",
+    "coverage": "nyc npm run test",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
     "build": "tsc",
     "lint": "eslint src/**/*.ts",
-    "prepublish": "npm run build",
     "prepack": "npm run build"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.10",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
@@ -33,7 +30,10 @@
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-n": "^16.6.2",
     "eslint-plugin-prettier": "^5.2.1",
+    "mocha": "^11.0.1",
+    "nyc": "^17.1.0",
     "prettier": "^3.4.2",
+    "ts-node": "^9.1.1",
     "typescript": "5.4.5"
   }
 }

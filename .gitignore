@@ -38,3 +38,9 @@ yarn-error.log*
 dist
 
 .env
+
+# ignored files
+ignore*
+
+# test coverage
+.nyc_output/

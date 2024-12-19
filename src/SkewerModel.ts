@@ -2,7 +2,7 @@ import * as fs from 'fs';
 
 import { randomUUID } from 'crypto';
 
-import { DBError } from './DBError';
+import { SchemaValidationError, RecordNotFoundError, FileLoadError, DuplicateIdError } from './SkewerError';
 import { ISkewerModel, SchemaType } from './types';
 import { booleanIsTrue } from './utils';
 
@@ -11,70 +11,125 @@ interface GenericRecordType<T extends ISkewerModel> {
 }
 
 export class SkewerModel<T extends ISkewerModel> {
-  name: string;
-
-  schema: SchemaType;
-
-  path: string;
+  private name: string;
+  private schema: SchemaType;
+  private path: string;
+  private isTxnOpen: boolean;
+  private dataCache: Map<string, T>;
 
   /**
    * Default constructor
    *
    * @param {string} name Name of the model
    * @param {SchemaType} schema Schema of the model
+   * @param {string} storagePath Custom path to use for data store in disk, defaults to "process.cwd()/storage"
    */
-  constructor(name: string, schema: SchemaType) {
-    console.log('constructed');
+  constructor(name: string, schema: SchemaType, storagePath = `${process.cwd()}/storage`) {
     this.name = name;
-    this.path = `${process.cwd()}/storage/${name}`;
+    this.path = `${storagePath}/${name}`;
     this.schema = schema;
+    this.dataCache = new Map();
+    this.isTxnOpen = false;
 
-    if (!fs.existsSync(`${process.cwd()}/storage`)) {
-      fs.mkdirSync(`${process.cwd()}/storage`);
+    if (!fs.existsSync(storagePath)) {
+      fs.mkdirSync(storagePath);
     }
 
-    this.initialize();
-  }
-  /**
-   * Initializes the empty json files if missing
-   *
-   * @private
-   */
-  private initialize() {
+    // Initializes the empty json files if missing
     if (!fs.existsSync(`${this.path}.json`)) {
       fs.writeFileSync(`${this.path}.json`, '{}');
     }
 
-    if (!fs.existsSync(`${this.path}_values.json`)) {
-      fs.writeFileSync(`${this.path}_values.json`, '[]');
+    this.loadFile();
+  }
+
+  // #region private methods
+  /**
+   * Loads the json data file into memory from disk
+   *
+   * @private
+   * @returns void
+   * @throws FileLoadError
+   */
+  private loadFile(): void {
+    let fileData: string;
+    try {
+      fileData = fs.readFileSync(`${this.path}.json`, 'utf-8');
+    } catch (error) {
+      throw new FileLoadError(`${this.path}.json`);
+    }
+
+    const records: GenericRecordType<T> = JSON.parse(fileData);
+    this.dataCache = new Map(Object.entries(records));
+  }
+
+  /**
+   * Saves the updated state of a collection to disk
+   *
+   * @private
+   */
+  private saveFile(): void {
+    if (!this.isTxnOpen) {
+      fs.writeFileSync(`${this.path}.json`, JSON.stringify(Object.fromEntries(this.dataCache)));
     }
   }
 
   /**
-   * Loads the json data file from memory
+   * Validates the record against schema and throws error if validation fails
    *
+   * @param {T} record document to be validated
    * @private
-   * @returns {object} GenericRecordType
+   * @returns {void}
+   * @throws SchemaValidationError
    */
-  private loadFile(): GenericRecordType<T> {
-    console.log('file accessed');
-    return JSON.parse(
-      fs.readFileSync(`${this.path}.json`, {
-        encoding: 'utf-8',
-      })
-    );
+  private validateSchema(record: T, isUpdate = false): void {
+    for (const key in this.schema) {
+      // validate required clause
+      if (this.schema[key].required && !record[key]?.toString()) {
+        throw new SchemaValidationError(record[key], 'required field');
+      }
+      // validate type
+      if (record[key] && record[key].toString() && !(record[key].constructor === this.schema[key].type)) {
+        throw new SchemaValidationError(`${record[key]}`, `should be of type ${this.schema[key].type.name}`);
+      }
+      // validate enum
+      if (
+        record[key] &&
+        this.schema[key].enum &&
+        this.schema[key].type === String &&
+        !this.schema[key]?.enum?.includes(record[key])
+      ) {
+        throw new SchemaValidationError(`${record[key]}`, `enum ${this.schema[key].enum}`);
+      }
+      // validate unique
+      if (booleanIsTrue(this.schema[key].unique) && this.findByKey(key, record[key]).length > (isUpdate ? 1 : 0)) {
+        throw new SchemaValidationError(`${record[key]}`, `unique`);
+      }
+    }
   }
+  // #endregion
+
   /**
-   * Loads the json array files from memory
-   *
-   * @returns {array} Array
+   * Start a transaction block to increase efficiency of multiple write operations
    */
-  private loadValuesFile(): Array<T> {
-    return JSON.parse(
-      fs.readFileSync(`${this.path}_values.json`, {
-        encoding: 'utf-8',
-      })
-    );
+  public openTransaction() {
+    this.isTxnOpen = true;
+  }
+
+  /**
+   * Close transaction block and save all changes to disk
+   */
+  public commitTransaction() {
+    this.isTxnOpen = false;
+    this.saveFile();
+  }
+
+  /**
+   * Abort transaction block and discard all changes
+   */
+  public abortTransaction() {
+    this.isTxnOpen = false;
+    this.loadFile();
   }
 
   /**
@@ -83,21 +138,17 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {Array<T>} Array of records
    */
   public getAllRecords(): Array<T> {
-    const valuesFile = this.loadValuesFile();
-
-    return valuesFile;
+    return Array.from(this.dataCache.values());
   }
 
   /**
    * Locates a record by id and returns it
    *
    * @param {string} recordId
-   * @returns {T | undefined} record
+   * @returns the record if found else returns undefined
    */
   public findById(recordId: string): T | undefined {
-    const records = this.loadFile();
-
-    return records[recordId];
+    return this.dataCache.get(recordId);
   }
 
   /**
@@ -105,13 +156,18 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param {string} key sarch field
    * @param {any} value search value
-   * @returns {T | undefined} record
+   * @returns an array of records found
    */
-  public findByKey(key: string, value: any): T | undefined {
-    const valuesFile = this.loadValuesFile();
+  public findByKey(key: string, value: any): Array<T> {
+    const foundRecords: Array<T> = [];
 
-    return valuesFile.find((x) => x[key] === value);
+    this.dataCache.forEach((dcValue) => {
+      if (dcValue[key] === value) foundRecords.push(dcValue);
+    });
+
+    return foundRecords;
   }
+
   /**
    * Locates a record using 2 key value pairs
    *
@@ -119,39 +175,24 @@ export class SkewerModel<T extends ISkewerModel> {
    * @param {any} value1 search value 1
    * @param {string} key2 sarch field 2
    * @param {any} value2 search value 2
-   * @returns {T | undefined} record
+   * @returns an array of records found
    */
-  public findByTwoKeys(key1: string, value1: any, key2: string, value2: any): T | undefined {
-    const valuesFile = this.loadValuesFile();
+  public findByTwoKeys(key1: string, value1: any, key2: string, value2: any): Array<T> {
+    const foundRecords: Array<T> = [];
 
-    return valuesFile.find((x) => x[key1] === value1 && x[key2] === value2);
+    this.dataCache.forEach((dcValue) => {
+      if (dcValue[key1] === value1 && dcValue[key2] === value2) foundRecords.push(dcValue);
+    });
+
+    return foundRecords;
   }
-
   /**
-   * Validates the record against schema and throws error if validation fails
+   * Counts the number of records in a collection
    *
-   * @param {T} record
-   * @returns void
+   * @returns count of records
    */
-  public validateSchema(record: T): void {
-    for (const key in this.schema) {
-      // validate required clause
-      if (this.schema[key].required && !record[key]?.toString()) {
-        throw new Error(`${record[key]} is a required field for ${key}!`);
-      }
-      // validate type
-      if (record[key] && record[key].toString() && record[key] instanceof this.schema[key].type) {
-        throw new Error(`value "${record[key]}" for key "${key}" should be of type ${this.schema[key].type.name}!`);
-      }
-      // validate enum
-      if (this.schema[key].enum && this.schema[key].type === String && !this.schema[key]?.enum?.includes(record[key])) {
-        throw new Error(`${record[key]} does not satisfy the schemas enum criteria ${this.schema[key].enum}!`);
-      }
-      // validate unique
-      if (booleanIsTrue(this.schema[key].unique) && this.findByKey(key, record[key])) {
-        throw new Error(`${record[key]} does not satisfy the schemas unique criteria!`);
-      }
-    }
+  public countAll(): number {
+    return this.dataCache.size;
   }
 
   /**
@@ -160,19 +201,24 @@ export class SkewerModel<T extends ISkewerModel> {
    * @param {any} record
    * @param {string} id? custom id to be used while inserting the record
    * @returns {T} returns the inserted record or throws error if schema validation fails
+   * @throws SchemaValidationError
    */
   public insertOne(record: any, id?: string): T {
-    const records = this.loadFile();
+    if (id && this.dataCache.has(id)) {
+      throw new DuplicateIdError();
+    }
 
     this.validateSchema(record);
 
     const newId = id || randomUUID();
+
     record.id = newId;
     record.createdAt = new Date();
     record.updatedAt = new Date();
-    records[newId] = record;
 
-    this.saveState(records);
+    this.dataCache.set(newId, record);
+
+    this.saveFile();
 
     return record;
   }
@@ -181,11 +227,10 @@ export class SkewerModel<T extends ISkewerModel> {
    * Inserts multiple records
    *
    * @param  {Array<any>} newRecords Array of multiple records with or without ids
-   * @returns {GenericRecordType<T>} returns multiple json documents in a single object or throws error if schema validation fails
+   * @returns {Array<T>} returns all inserted json documents in an array or throws error if schema validation fails
+   * @throws SchemaValidationError
    */
-  public insertMany(newRecords: Array<any>): GenericRecordType<T> {
-    const records = this.loadFile();
-
+  public insertMany(newRecords: Array<any>): Array<T> {
     newRecords.forEach((x) => {
       this.validateSchema(x);
 
@@ -194,12 +239,12 @@ export class SkewerModel<T extends ISkewerModel> {
       x.createdAt = new Date();
       x.updatedAt = new Date();
 
-      records[newId] = x;
+      this.dataCache.set(newId, x);
     });
 
-    this.saveState(records);
+    this.saveFile();
 
-    return records;
+    return newRecords;
   }
 
   /**
@@ -207,25 +252,29 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param  {string} recordId search id
    * @param  {Partial<T>} newRecord partial record with new values
-   * @returns {T | Error} new updated record or error if record is not found
+   * @returns {T} new updated record
+   * @throws RecordNotFoundError | SchemaValidationError
    */
-  public updateById(recordId: string, newRecord: Partial<T>): T | Error {
-    const records = this.loadFile();
-
-    const oldRecord = records[recordId];
+  public updateById(recordId: string, newRecord: Partial<T>): T {
+    const oldRecord = this.dataCache.get(recordId);
 
     if (!oldRecord) {
-      return new DBError('Record not found!');
+      throw new RecordNotFoundError();
     }
 
+    // in case id or created at fields are passed delete them
     delete newRecord.id;
     delete newRecord.createdAt;
 
-    records[recordId] = { ...oldRecord, ...newRecord, updatedAt: new Date() };
+    const formedNewRecord = { ...oldRecord, ...newRecord, updatedAt: new Date() };
 
-    this.saveState(records);
+    this.validateSchema(formedNewRecord, true);
 
-    return records[recordId];
+    this.dataCache.set(recordId, formedNewRecord);
+
+    this.saveFile();
+
+    return formedNewRecord;
   }
 
   /**
@@ -233,71 +282,41 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param  {Partial<T>} record
    * @param  {string} id
-   * @returns {T} new updated record
+   * @returns {T} new updated / inserted record
+   * @throws RecordNotFoundError | SchemaValidationError
    */
   public insertOrUpdate(record: Partial<T>, id: string): T {
-    const records = this.loadFile();
-
-    if (records[id]) {
-      // update
-      const oldRecord = records[id];
-
-      records[id] = { ...oldRecord, ...record, updatedAt: new Date() };
-
-      this.saveState(records);
+    if (this.dataCache.has(id)) {
+      return this.updateById(id, record);
     } else {
-      // insert
-      const newId = id;
-      record.id = newId;
-      record.createdAt = new Date();
-      record.updatedAt = new Date();
-      records[newId] = record as T;
-
-      this.saveState(records);
+      return this.insertOne(record, id);
     }
-
-    return record as T;
   }
 
   /**
    * Searches for a record by id and deletes it
    *
    * @param  {string} recordId id to search for
-   * @returns {T | Error} the deleted record or an error when record is not found
+   * @returns {T} the deleted record
+   * @throws RecordNotFoundError
    */
-  public deleteById(recordId: string): T | Error {
-    const records = this.loadFile();
+  public deleteById(recordId: string): T {
+    const deletedRecord = this.dataCache.get(recordId);
 
-    const deletedRecord = records[recordId];
-    delete records[recordId];
-
-    if (!deletedRecord) {
-      return new DBError('Record not found for deletion!');
+    if (!deletedRecord || !this.dataCache.delete(recordId)) {
+      throw new RecordNotFoundError();
     }
 
-    this.saveState(records);
+    this.saveFile();
 
     return deletedRecord;
   }
 
   /**
    * Deletes all records in a collection
-   *
-   * @returns void
    */
   public deleteAll(): void {
-    this.saveState({});
-  }
-
-  /**
-   * Saves the updated state of a file to memory
-   *
-   * @private
-   * @param  {GenericRecordType<T>} records
-   * @returns void
-   */
-  private saveState(records: GenericRecordType<T>): void {
-    fs.writeFileSync(`${this.path}.json`, JSON.stringify(records));
-    fs.writeFileSync(`${this.path}_values.json`, JSON.stringify(Object.values(records)));
+    this.dataCache.clear();
+    this.saveFile();
   }
 }
