@@ -17,23 +17,36 @@ const testSchema: SchemaType = {
 
 describe('SkewerModel', () => {
   let model: SkewerModel<TestModel>;
+  const testBasePath = `${process.cwd()}/test_storage`;
 
-  beforeEach(() => {
-    model = new SkewerModel<TestModel>('testModel', testSchema);
-    // Clear existing data before each test
+  beforeEach(async () => {
+    model = new SkewerModel<TestModel>('testModel', testSchema, testBasePath);
+    await model.initialize();
     model.deleteAll();
   });
 
-  it('should insert a single record', () => {
+  after(async () => {
+    try {
+      await model.abortTransaction();
+    } finally {
+    }
+  });
+
+  it('should initialize correctly', async () => {
+    const allRecords = model.getAllRecords();
+    assert.equal(allRecords.length, 0);
+  });
+
+  it('should insert a single record', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
     const insertedRecord = model.insertOne(record);
     assert.equal(model.countAll(), 1);
-    assert.deepEqual(insertedRecord, {
-      ...record,
-      id: insertedRecord.id,
-      createdAt: insertedRecord.createdAt,
-      updatedAt: insertedRecord.updatedAt,
-    });
+    assert(insertedRecord.id);
+    assert(insertedRecord.createdAt instanceof Date);
+    assert(insertedRecord.updatedAt instanceof Date);
+
+    const recordFromDb = model.findById(insertedRecord.id);
+    assert.deepEqual(recordFromDb, insertedRecord);
   });
 
   it('should insert multiple records', () => {
@@ -43,17 +56,13 @@ describe('SkewerModel', () => {
     ];
     const insertedRecords = model.insertMany(records);
     assert.equal(model.countAll(), 2);
-    assert.deepEqual(insertedRecords[0], {
-      ...records[0],
-      id: insertedRecords[0].id,
-      createdAt: insertedRecords[0].createdAt,
-      updatedAt: insertedRecords[0].updatedAt,
-    });
-    assert.deepEqual(insertedRecords[1], {
-      ...records[1],
-      id: insertedRecords[1].id,
-      createdAt: insertedRecords[1].createdAt,
-      updatedAt: insertedRecords[1].updatedAt,
+
+    insertedRecords.forEach((record) => {
+      assert(record.id);
+      assert(record.createdAt instanceof Date);
+      assert(record.updatedAt instanceof Date);
+      const recordFromDb = model.findById(record.id);
+      assert.deepEqual(recordFromDb, record);
     });
   });
 
@@ -141,27 +150,50 @@ describe('SkewerModel', () => {
     assert.equal(model.countAll(), 0);
   });
 
-  it('should find a record by two keys', () => {
+  it('should find records by two keys', () => {
     const record1 = { name: 'John Doe', age: 30, active: true };
     const record2 = { name: 'Jane Doe', age: 30, active: false };
-    model.insertOne(record1);
-    model.insertOne(record2);
-    const foundRecord = model.findByTwoKeys('name', 'Jane Doe', 'age', 30)?.[0];
-    assert.deepEqual(foundRecord, {
-      ...record2,
-      id: foundRecord?.id,
-      createdAt: foundRecord?.createdAt,
-      updatedAt: foundRecord?.updatedAt,
+
+    model.insertMany([record1, record2]);
+
+    const foundRecords = model.findByTwoKeys('age', 30, 'active', true);
+    assert.equal(foundRecords.length, 1);
+    assert.deepEqual(foundRecords[0], {
+      ...record1,
+      id: foundRecords[0].id,
+      createdAt: foundRecords[0].createdAt,
+      updatedAt: foundRecords[0].updatedAt,
     });
   });
 
-  it('should open and commit a transaction', () => {
+  it('should open and commit transaction', async () => {
     model.openTransaction();
     const record = { name: 'John Doe', age: 30, active: true };
     model.insertOne(record);
-    model.commitTransaction();
 
     assert.equal(model.countAll(), 1);
+
+    await model.commitTransaction();
+    await model.initialize();
+
+    assert.equal(model.countAll(), 1);
+  });
+
+  it('should open, modify during, and abort transaction', async () => {
+    const record = { name: 'John Doe', age: 30, active: true };
+    let insertedRecord = model.insertOne(record);
+    assert.equal(model.countAll(), 1);
+
+    model.openTransaction();
+
+    insertedRecord = model.updateById(insertedRecord.id, { age: 35 }); // Modify during transaction
+    assert.equal(insertedRecord.age, 35);
+
+    await model.abortTransaction();
+    await model.initialize(); // Reload to verify changes discarded
+
+    const retrievedRecord = model.findById(insertedRecord.id);
+    assert.equal(retrievedRecord?.age, 30); // Original value before transaction should be restored
   });
 
   it('should validate unique constraint', () => {

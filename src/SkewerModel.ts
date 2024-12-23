@@ -1,19 +1,14 @@
-import * as fs from 'fs';
-
 import { randomUUID } from 'crypto';
 
 import { SchemaValidationError, RecordNotFoundError, FileLoadError, DuplicateIdError } from './SkewerError';
 import { ISkewerModel, SchemaType } from './types';
 import { booleanIsTrue } from './utils';
-
-interface GenericRecordType<T extends ISkewerModel> {
-  [id: string]: T;
-}
+import { FileStorage } from './Storage';
 
 export class SkewerModel<T extends ISkewerModel> {
-  private name: string;
   private schema: SchemaType;
   private path: string;
+  private basePath: string;
   private isTxnOpen: boolean;
   private dataCache: Map<string, T>;
 
@@ -22,25 +17,14 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param {string} name Name of the model
    * @param {SchemaType} schema Schema of the model
-   * @param {string} storagePath Custom path to use for data store in disk, defaults to "process.cwd()/storage"
+   * @param {string} basePath Custom path to use for data store in disk, defaults to "process.cwd()/storage"
    */
-  constructor(name: string, schema: SchemaType, storagePath = `${process.cwd()}/storage`) {
-    this.name = name;
-    this.path = `${storagePath}/${name}`;
+  constructor(name: string, schema: SchemaType, basePath = `${process.cwd()}/storage`) {
+    this.basePath = basePath;
+    this.path = `${basePath}/${name}`;
     this.schema = schema;
     this.dataCache = new Map();
     this.isTxnOpen = false;
-
-    if (!fs.existsSync(storagePath)) {
-      fs.mkdirSync(storagePath);
-    }
-
-    // Initializes the empty json files if missing
-    if (!fs.existsSync(`${this.path}.json`)) {
-      fs.writeFileSync(`${this.path}.json`, '{}');
-    }
-
-    this.loadFile();
   }
 
   // #region private methods
@@ -48,18 +32,18 @@ export class SkewerModel<T extends ISkewerModel> {
    * Loads the json data file into memory from disk
    *
    * @private
-   * @returns void
+   * @returns Promise<void>
    * @throws FileLoadError
    */
-  private loadFile(): void {
+  private async loadFile(): Promise<void> {
     let fileData: string;
     try {
-      fileData = fs.readFileSync(`${this.path}.json`, 'utf-8');
+      fileData = await FileStorage.read(`${this.path}.json`);
     } catch (error) {
       throw new FileLoadError(`${this.path}.json`);
     }
 
-    const records: GenericRecordType<T> = JSON.parse(fileData);
+    const records: { [id: string]: T } = JSON.parse(fileData);
     this.dataCache = new Map(Object.entries(records));
   }
 
@@ -68,9 +52,9 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @private
    */
-  private saveFile(): void {
+  private async saveFile(): Promise<void> {
     if (!this.isTxnOpen) {
-      fs.writeFileSync(`${this.path}.json`, JSON.stringify(Object.fromEntries(this.dataCache)));
+      await FileStorage.write(`${this.path}.json`, JSON.stringify(Object.fromEntries(this.dataCache)));
     }
   }
 
@@ -110,16 +94,32 @@ export class SkewerModel<T extends ISkewerModel> {
   // #endregion
 
   /**
+   * @returns Promise
+   */
+  async initialize(): Promise<void> {
+    if (!(await FileStorage.exists(this.basePath))) {
+      await FileStorage.mkdir(this.basePath);
+    }
+
+    // Initializes the empty json files if missing
+    if (!(await FileStorage.exists(`${this.path}.json`))) {
+      await FileStorage.write(`${this.path}.json`, '{}');
+    }
+
+    this.loadFile();
+  }
+
+  /**
    * Start a transaction block to increase efficiency of multiple write operations
    */
-  public openTransaction() {
+  openTransaction() {
     this.isTxnOpen = true;
   }
 
   /**
    * Close transaction block and save all changes to disk
    */
-  public commitTransaction() {
+  async commitTransaction(): Promise<void> {
     this.isTxnOpen = false;
     this.saveFile();
   }
@@ -127,7 +127,7 @@ export class SkewerModel<T extends ISkewerModel> {
   /**
    * Abort transaction block and discard all changes
    */
-  public abortTransaction() {
+  async abortTransaction(): Promise<void> {
     this.isTxnOpen = false;
     this.loadFile();
   }
@@ -137,7 +137,7 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @returns {Array<T>} Array of records
    */
-  public getAllRecords(): Array<T> {
+  getAllRecords(): Array<T> {
     return Array.from(this.dataCache.values());
   }
 
@@ -147,7 +147,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @param {string} recordId
    * @returns the record if found else returns undefined
    */
-  public findById(recordId: string): T | undefined {
+  findById(recordId: string): T | undefined {
     return this.dataCache.get(recordId);
   }
 
@@ -158,7 +158,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @param {any} value search value
    * @returns an array of records found
    */
-  public findByKey(key: string, value: any): Array<T> {
+  findByKey(key: string, value: any): Array<T> {
     const foundRecords: Array<T> = [];
 
     this.dataCache.forEach((dcValue) => {
@@ -177,7 +177,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @param {any} value2 search value 2
    * @returns an array of records found
    */
-  public findByTwoKeys(key1: string, value1: any, key2: string, value2: any): Array<T> {
+  findByTwoKeys(key1: string, value1: any, key2: string, value2: any): Array<T> {
     const foundRecords: Array<T> = [];
 
     this.dataCache.forEach((dcValue) => {
@@ -191,7 +191,7 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @returns count of records
    */
-  public countAll(): number {
+  countAll(): number {
     return this.dataCache.size;
   }
 
@@ -203,7 +203,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {T} returns the inserted record or throws error if schema validation fails
    * @throws SchemaValidationError
    */
-  public insertOne(record: any, id?: string): T {
+  insertOne(record: any, id?: string): T {
     if (id && this.dataCache.has(id)) {
       throw new DuplicateIdError();
     }
@@ -230,7 +230,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {Array<T>} returns all inserted json documents in an array or throws error if schema validation fails
    * @throws SchemaValidationError
    */
-  public insertMany(newRecords: Array<any>): Array<T> {
+  insertMany(newRecords: Array<any>): Array<T> {
     newRecords.forEach((x) => {
       this.validateSchema(x);
 
@@ -255,7 +255,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {T} new updated record
    * @throws RecordNotFoundError | SchemaValidationError
    */
-  public updateById(recordId: string, newRecord: Partial<T>): T {
+  updateById(recordId: string, newRecord: Partial<T>): T {
     const oldRecord = this.dataCache.get(recordId);
 
     if (!oldRecord) {
@@ -285,7 +285,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {T} new updated / inserted record
    * @throws RecordNotFoundError | SchemaValidationError
    */
-  public insertOrUpdate(record: Partial<T>, id: string): T {
+  insertOrUpdate(record: Partial<T>, id: string): T {
     if (this.dataCache.has(id)) {
       return this.updateById(id, record);
     } else {
@@ -300,7 +300,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {T} the deleted record
    * @throws RecordNotFoundError
    */
-  public deleteById(recordId: string): T {
+  deleteById(recordId: string): T {
     const deletedRecord = this.dataCache.get(recordId);
 
     if (!deletedRecord || !this.dataCache.delete(recordId)) {
@@ -315,7 +315,7 @@ export class SkewerModel<T extends ISkewerModel> {
   /**
    * Deletes all records in a collection
    */
-  public deleteAll(): void {
+  deleteAll(): void {
     this.dataCache.clear();
     this.saveFile();
   }

@@ -80,6 +80,9 @@ try {
 }
 ```
 
+## Testing
+90% of existing test cases have been generated using LLM models
+
 ## Available methods
 | **Method**                                | **Description**                                       |
 | ----------------------------------------- | ----------------------------------------------------- |
