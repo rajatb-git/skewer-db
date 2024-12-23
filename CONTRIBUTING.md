@@ -22,9 +22,9 @@ Thank you for your interest in contributing to SkewerDB! We appreciate all contr
 
 ## Guidelines
 
-* **Code style:** Follow the existing code style of the project.  Use consistent indentation, spacing, and naming conventions.
+* **Code style:** Follow the existing code style of the project. Use consistent indentation, spacing, and naming conventions.
 
-* **Testing:** Write tests for new features and bug fixes.  Ensure your changes don't break existing tests.
+* **Testing:** Write / Generate tests for new features and bug fixes. Ensure your changes don't break existing tests.
 
 * **Documentation:** Update the documentation if necessary to reflect your changes.
 
