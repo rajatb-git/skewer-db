@@ -1,4 +1,5 @@
 # skewer-db
+![skewerdb](./docs/skewerdb_icon_200.svg) 
 
 [CONTRIBUTING](https://github.com/rajatb-git/skewer-db/blob/main/CONTRIBUTING.md) |
 [Code of Conduct](https://github.com/rajatb-git/skewer-db/blob/main/CODE_OF_CONDUCT.md) |
@@ -35,8 +36,8 @@ export interface IUser {
 }
 
 export const UserSchema: SchemaType = {
-  userId: { type: String, required: true },
-  name: { type: String, required: true },
+  userId: { type: String, required: true, unique: true },
+  name: { type: String, required: true, index: true },
 };
 
 export interface IUserModel extends IUser, ISkewerModel {}

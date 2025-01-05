@@ -44,3 +44,7 @@ ignore*
 
 # test coverage
 .nyc_output/
+
+# local storage files
+storage
+test_storage

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 
 import { SchemaValidationError, RecordNotFoundError, FileLoadError, DuplicateIdError } from './SkewerError';
-import { ISkewerModel, SchemaType } from './types';
+import { DataCacheType, IndexCache, ISkewerModel, SchemaType } from './types';
 import { booleanIsTrue } from './utils';
 import { FileStorage } from './Storage';
 
@@ -10,7 +10,10 @@ export class SkewerModel<T extends ISkewerModel> {
   private path: string;
   private basePath: string;
   private isTxnOpen: boolean;
-  private dataCache: Map<string, T>;
+  private dataCache: DataCacheType<T>;
+  // { "indexedField": { "indexedFieldValue": ["database_id_1", "database_id_2"] } }
+  private indexCache: IndexCache;
+  private isIndexDirty: boolean;
 
   /**
    * Default constructor
@@ -23,8 +26,10 @@ export class SkewerModel<T extends ISkewerModel> {
     this.basePath = basePath;
     this.path = `${basePath}/${name}`;
     this.schema = schema;
-    this.dataCache = new Map();
+    this.dataCache = {};
     this.isTxnOpen = false;
+    this.isIndexDirty = false;
+    this.indexCache = {};
   }
 
   // #region private methods
@@ -36,15 +41,18 @@ export class SkewerModel<T extends ISkewerModel> {
    * @throws FileLoadError
    */
   private async loadFile(): Promise<void> {
-    let fileData: string;
+    let fileData: string, indexFileData: string;
     try {
       fileData = await FileStorage.read(`${this.path}.json`);
+      indexFileData = await FileStorage.read(`${this.path}_index.json`);
     } catch (error) {
       throw new FileLoadError(`${this.path}.json`);
     }
 
     const records: { [id: string]: T } = JSON.parse(fileData);
-    this.dataCache = new Map(Object.entries(records));
+    this.dataCache = records;
+
+    this.indexCache = JSON.parse(indexFileData);
   }
 
   /**
@@ -54,7 +62,11 @@ export class SkewerModel<T extends ISkewerModel> {
    */
   private async saveFile(): Promise<void> {
     if (!this.isTxnOpen) {
-      await FileStorage.write(`${this.path}.json`, JSON.stringify(Object.fromEntries(this.dataCache)));
+      await FileStorage.write(`${this.path}.json`, JSON.stringify(this.dataCache));
+
+      if (this.isIndexDirty) {
+        await FileStorage.write(`${this.path}_index.json`, JSON.stringify(this.indexCache));
+      }
     }
   }
 
@@ -86,10 +98,96 @@ export class SkewerModel<T extends ISkewerModel> {
         throw new SchemaValidationError(`${record[key]}`, `enum ${this.schema[key].enum}`);
       }
       // validate unique
-      if (booleanIsTrue(this.schema[key].unique) && this.findByKey(key, record[key]).length > (isUpdate ? 1 : 0)) {
+      if (booleanIsTrue(this.schema[key].unique) && this.find({ [key]: record[key] }).length > (isUpdate ? 1 : 0)) {
         throw new SchemaValidationError(`${record[key]}`, `unique`);
       }
     }
+  }
+
+  /**
+   * Updates the index cache for one record
+   *
+   * @param  {any} record the insert / update record data
+   * @param  {string} id id of the record being inserted / updated
+   * @private
+   * @returns void
+   */
+  private addToIndex(record: any, id: string): void {
+    this.isIndexDirty = true;
+
+    Object.keys(record).forEach((recordKey) => {
+      const recordValue = record[recordKey];
+
+      if (this.schema[recordKey].unique || this.schema[recordKey].index) {
+        if (!this.indexCache[recordKey] || !this.indexCache[recordKey][recordValue]) {
+          this.indexCache[recordKey] = { [recordValue]: [] };
+        }
+
+        this.indexCache[recordKey][recordValue].push(id);
+      }
+    });
+  }
+
+  /**
+   * Removes the old indexed value and adds the new one
+   *
+   * @param  {any} oldRecord
+   * @param  {any} newRecord
+   * @param  {string} id
+   * @private
+   * @returns void
+   */
+  private updateInIndex(oldRecord: any, newRecord: any, id: string): void {
+    this.isIndexDirty = true;
+
+    Object.keys(newRecord).forEach((recordKey) => {
+      const recordValue = newRecord[recordKey];
+
+      if (this.schema[recordKey].unique || this.schema[recordKey].index) {
+        if (!this.indexCache[recordKey]) {
+          this.indexCache[recordKey] = { [recordValue]: [] };
+        }
+
+        // locates the index for a field with the old value and then removes the record id from the id array
+        this.indexCache[recordKey][oldRecord[recordKey]] = this.indexCache[recordKey][oldRecord[recordKey]].filter(
+          (x) => x !== id
+        );
+
+        this.indexCache[recordKey][recordValue].push(id);
+      }
+    });
+  }
+
+  /**
+   * Removes the deleted value from index
+   *
+   * @param  {any} oldRecord
+   * @param  {string} id
+   * @private
+   * @returns void
+   */
+  private deleteInIndex(oldRecord: any, id: string): void {
+    this.isIndexDirty = true;
+    const tempOldRecord = { ...oldRecord };
+
+    delete tempOldRecord.id;
+    delete tempOldRecord.createdAt;
+    delete tempOldRecord.updatedAt;
+
+    Object.keys(tempOldRecord).forEach((recordKey) => {
+      const recordValue = tempOldRecord[recordKey];
+
+      if (this.schema[recordKey].unique || this.schema[recordKey].index) {
+        if (!this.indexCache[recordKey]) {
+          this.indexCache[recordKey] = { [recordValue]: [] };
+        }
+
+        // locates the index for a field with the old value and then removes the record id from the id array
+        this.indexCache[recordKey][tempOldRecord[recordKey]] = this.indexCache[recordKey][
+          tempOldRecord[recordKey]
+        ].filter((x) => x !== id);
+      }
+    });
   }
   // #endregion
 
@@ -104,6 +202,11 @@ export class SkewerModel<T extends ISkewerModel> {
     // Initializes the empty json files if missing
     if (!(await FileStorage.exists(`${this.path}.json`))) {
       await FileStorage.write(`${this.path}.json`, '{}');
+    }
+
+    // Initializes the empty json files if missing
+    if (!(await FileStorage.exists(`${this.path}_index.json`))) {
+      await FileStorage.write(`${this.path}_index.json`, '{}');
     }
 
     this.loadFile();
@@ -138,7 +241,7 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns {Array<T>} Array of records
    */
   getAllRecords(): Array<T> {
-    return Array.from(this.dataCache.values());
+    return Array.from(Object.values(this.dataCache));
   }
 
   /**
@@ -148,51 +251,61 @@ export class SkewerModel<T extends ISkewerModel> {
    * @returns the record if found else returns undefined
    */
   findById(recordId: string): T | undefined {
-    return this.dataCache.get(recordId);
+    return this.dataCache[recordId];
   }
 
   /**
-   * Locates a record using a key value pair
+   * Locates all records that match the search parameters (case-sensitive)
    *
-   * @param {string} key sarch field
-   * @param {any} value search value
+   * @param {object} searchParams search parameters
    * @returns an array of records found
    */
-  findByKey(key: string, value: any): Array<T> {
-    const foundRecords: Array<T> = [];
+  find(searchParams: { [key: string]: string | number | boolean }): Array<T> {
+    const foundRecords: Array<any> = [],
+      tempDataCache: DataCacheType<any> = {},
+      searchPArr = Object.entries(searchParams);
+    let counter = 0;
 
-    this.dataCache.forEach((dcValue) => {
-      if (dcValue[key] === value) foundRecords.push(dcValue);
+    for (const [key, value] of searchPArr) {
+      ++counter;
+
+      if (this.schema[key].unique || this.schema[key].index) {
+        const dbIds = this.indexCache[key]?.[value as any] || [];
+
+        dbIds.forEach((dbId) => {
+          const record = (counter === 1 ? this.dataCache : tempDataCache)[dbId];
+          if (record) tempDataCache[dbId] = { ...record, count: (record.count || 0) + 1 };
+        });
+      } else {
+        Object.values(counter === 1 ? this.dataCache : tempDataCache).forEach((dcValue) => {
+          if (dcValue[key] === value) {
+            tempDataCache[dcValue.id] = { ...dcValue, count: (dcValue.count || 0) + 1 };
+          }
+        });
+      }
+
+      if (tempDataCache.size === 0) {
+        break;
+      }
+    }
+
+    Object.values(tempDataCache).forEach((value) => {
+      if (value.count === searchPArr.length) {
+        delete value.count;
+        foundRecords.push(value);
+      }
     });
 
     return foundRecords;
   }
 
-  /**
-   * Locates a record using 2 key value pairs
-   *
-   * @param {string} key1 sarch field 1
-   * @param {any} value1 search value 1
-   * @param {string} key2 sarch field 2
-   * @param {any} value2 search value 2
-   * @returns an array of records found
-   */
-  findByTwoKeys(key1: string, value1: any, key2: string, value2: any): Array<T> {
-    const foundRecords: Array<T> = [];
-
-    this.dataCache.forEach((dcValue) => {
-      if (dcValue[key1] === value1 && dcValue[key2] === value2) foundRecords.push(dcValue);
-    });
-
-    return foundRecords;
-  }
   /**
    * Counts the number of records in a collection
    *
    * @returns count of records
    */
   countAll(): number {
-    return this.dataCache.size;
+    return Object.keys(this.dataCache).length;
   }
 
   /**
@@ -200,11 +313,11 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param {any} record
    * @param {string} id? custom id to be used while inserting the record
-   * @returns {T} returns the inserted record or throws error if schema validation fails
+   * @returns {Promise<T>} returns the inserted record or throws error if schema validation fails
    * @throws SchemaValidationError
    */
-  insertOne(record: any, id?: string): T {
-    if (id && this.dataCache.has(id)) {
+  async insertOne(record: any, id?: string): Promise<T> {
+    if (id && this.dataCache[id]) {
       throw new DuplicateIdError();
     }
 
@@ -212,13 +325,15 @@ export class SkewerModel<T extends ISkewerModel> {
 
     const newId = id || randomUUID();
 
+    this.addToIndex(record, newId);
+
     record.id = newId;
-    record.createdAt = new Date();
-    record.updatedAt = new Date();
+    record.createdAt = new Date().toISOString();
+    record.updatedAt = new Date().toISOString();
 
-    this.dataCache.set(newId, record);
+    this.dataCache[newId] = record;
 
-    this.saveFile();
+    await this.saveFile();
 
     return record;
   }
@@ -227,22 +342,25 @@ export class SkewerModel<T extends ISkewerModel> {
    * Inserts multiple records
    *
    * @param  {Array<any>} newRecords Array of multiple records with or without ids
-   * @returns {Array<T>} returns all inserted json documents in an array or throws error if schema validation fails
+   * @returns {Promise<Array<T>>} returns all inserted json documents in an array or throws error if schema validation fails
    * @throws SchemaValidationError
    */
-  insertMany(newRecords: Array<any>): Array<T> {
+  async insertMany(newRecords: Array<any>): Promise<Array<T>> {
     newRecords.forEach((x) => {
       this.validateSchema(x);
 
       const newId = x.id || randomUUID();
-      x.id = newId;
-      x.createdAt = new Date();
-      x.updatedAt = new Date();
 
-      this.dataCache.set(newId, x);
+      this.addToIndex(x, newId);
+
+      x.id = newId;
+      x.createdAt = new Date().toISOString();
+      x.updatedAt = new Date().toISOString();
+
+      this.dataCache[newId] = x;
     });
 
-    this.saveFile();
+    await this.saveFile();
 
     return newRecords;
   }
@@ -252,11 +370,11 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param  {string} recordId search id
    * @param  {Partial<T>} newRecord partial record with new values
-   * @returns {T} new updated record
+   * @returns {Promise<T>} new updated record
    * @throws RecordNotFoundError | SchemaValidationError
    */
-  updateById(recordId: string, newRecord: Partial<T>): T {
-    const oldRecord = this.dataCache.get(recordId);
+  async updateById(recordId: string, newRecord: Partial<T>): Promise<T> {
+    const oldRecord = this.dataCache[recordId];
 
     if (!oldRecord) {
       throw new RecordNotFoundError();
@@ -265,14 +383,17 @@ export class SkewerModel<T extends ISkewerModel> {
     // in case id or created at fields are passed delete them
     delete newRecord.id;
     delete newRecord.createdAt;
+    delete newRecord.updatedAt;
 
-    const formedNewRecord = { ...oldRecord, ...newRecord, updatedAt: new Date() };
+    this.updateInIndex(oldRecord, newRecord, oldRecord.id);
+
+    const formedNewRecord = { ...oldRecord, ...newRecord, updatedAt: new Date().toISOString() };
 
     this.validateSchema(formedNewRecord, true);
 
-    this.dataCache.set(recordId, formedNewRecord);
+    this.dataCache[recordId] = formedNewRecord;
 
-    this.saveFile();
+    await this.saveFile();
 
     return formedNewRecord;
   }
@@ -282,11 +403,11 @@ export class SkewerModel<T extends ISkewerModel> {
    *
    * @param  {Partial<T>} record
    * @param  {string} id
-   * @returns {T} new updated / inserted record
+   * @returns {Promise<T>} new updated / inserted record
    * @throws RecordNotFoundError | SchemaValidationError
    */
-  insertOrUpdate(record: Partial<T>, id: string): T {
-    if (this.dataCache.has(id)) {
+  insertOrUpdate(record: Partial<T>, id: string): Promise<T> {
+    if (this.dataCache[id]) {
       return this.updateById(id, record);
     } else {
       return this.insertOne(record, id);
@@ -297,17 +418,21 @@ export class SkewerModel<T extends ISkewerModel> {
    * Searches for a record by id and deletes it
    *
    * @param  {string} recordId id to search for
-   * @returns {T} the deleted record
+   * @returns {Promise<T>} the deleted record
    * @throws RecordNotFoundError
    */
-  deleteById(recordId: string): T {
-    const deletedRecord = this.dataCache.get(recordId);
+  async deleteById(recordId: string): Promise<T> {
+    const deletedRecord = this.dataCache[recordId];
 
-    if (!deletedRecord || !this.dataCache.delete(recordId)) {
+    if (!deletedRecord) {
       throw new RecordNotFoundError();
     }
 
-    this.saveFile();
+    delete this.dataCache[recordId];
+
+    this.deleteInIndex(deletedRecord, recordId);
+
+    await this.saveFile();
 
     return deletedRecord;
   }
@@ -315,8 +440,8 @@ export class SkewerModel<T extends ISkewerModel> {
   /**
    * Deletes all records in a collection
    */
-  deleteAll(): void {
-    this.dataCache.clear();
-    this.saveFile();
+  async deleteAll(): Promise<void> {
+    this.dataCache = {};
+    await this.saveFile();
   }
 }

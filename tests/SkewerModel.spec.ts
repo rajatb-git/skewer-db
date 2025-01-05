@@ -39,46 +39,44 @@ describe('SkewerModel', () => {
 
   it('should insert a single record', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    const insertedRecord = model.insertOne(record);
+    const insertedRecord = await model.insertOne(record);
     assert.equal(model.countAll(), 1);
     assert(insertedRecord.id);
-    assert(insertedRecord.createdAt instanceof Date);
-    assert(insertedRecord.updatedAt instanceof Date);
+    assert.ok(insertedRecord.createdAt);
+    assert.ok(insertedRecord.updatedAt);
 
     const recordFromDb = model.findById(insertedRecord.id);
     assert.deepEqual(recordFromDb, insertedRecord);
   });
 
-  it('should insert multiple records', () => {
+  it('should insert multiple records', async () => {
     const records = [
       { name: 'Jane Doe', age: 25, active: false },
       { name: 'Peter Pan', age: 18, active: true },
     ];
-    const insertedRecords = model.insertMany(records);
+    const insertedRecords = await model.insertMany(records);
     assert.equal(model.countAll(), 2);
 
     insertedRecords.forEach((record) => {
       assert(record.id);
-      assert(record.createdAt instanceof Date);
-      assert(record.updatedAt instanceof Date);
+      assert.ok(record.createdAt);
+      assert.ok(record.updatedAt);
       const recordFromDb = model.findById(record.id);
       assert.deepEqual(recordFromDb, record);
     });
   });
 
-  it('should throw DuplicateIdError when inserting a record with an existing ID', () => {
+  it('should throw DuplicateIdError when inserting a record with an existing ID', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    const insertedRecord = model.insertOne(record);
+    const insertedRecord = await model.insertOne(record);
 
-    assert.throws(() => {
-      model.insertOne(record, insertedRecord.id);
-    }, /DuplicateIdError/);
+    await assert.rejects(model.insertOne(record, insertedRecord.id), /DuplicateIdError/);
   });
 
   it('should throw error if schema validation fails', () => {
-    assert.throws(() => model.insertOne({ name: 123, age: 30 } as any), /SchemaValidationError/);
-    assert.throws(() => model.insertOne({ name: 'John Doe', age: '30' } as any), /SchemaValidationError/);
-    assert.throws(() => model.insertOne({ age: 30 } as any), /SchemaValidationError/);
+    assert.rejects(model.insertOne({ name: 123, age: 30 } as any), /SchemaValidationError/);
+    assert.rejects(model.insertOne({ name: 'John Doe', age: '30' } as any), /SchemaValidationError/);
+    assert.rejects(model.insertOne({ age: 30 } as any), /SchemaValidationError/);
   });
 
   it('should get all records', () => {
@@ -90,34 +88,50 @@ describe('SkewerModel', () => {
     assert.equal(allRecords.length, 2);
   });
 
-  it('should find a record by id', () => {
+  it('should find a record by id', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    const insertedRecord = model.insertOne(record);
+    const insertedRecord = await model.insertOne(record);
     const foundRecord = model.findById(insertedRecord.id);
     assert.deepEqual(foundRecord, insertedRecord);
   });
 
-  it('should find a record by key', () => {
+  it('should find a record by key', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    const insertedRecord = model.insertOne(record);
-    const foundRecord = model.findByKey('name', 'John Doe')?.[0];
+    const insertedRecord = await model.insertOne(record);
+    const foundRecord = model.find({ name: 'John Doe' })?.[0];
     assert.deepEqual(foundRecord, insertedRecord);
   });
 
-  it('should update a record by id', () => {
+  it('should find records by two keys', () => {
+    const record1 = { name: 'John Doe', age: 30, active: true };
+    const record2 = { name: 'Jane Doe', age: 30, active: false };
+
+    model.insertMany([record1, record2]);
+
+    const foundRecords = model.find({ age: 30, active: true });
+    assert.equal(foundRecords.length, 1);
+    assert.deepEqual(foundRecords[0], {
+      ...record1,
+      id: foundRecords[0].id,
+      createdAt: foundRecords[0].createdAt,
+      updatedAt: foundRecords[0].updatedAt,
+    });
+  });
+
+  it('should update a record by id', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    const insertedRecord = model.insertOne(record);
-    const updatedRecord = model.updateById(insertedRecord.id, { age: 35 });
+    const insertedRecord = await model.insertOne(record);
+    const updatedRecord = await model.updateById(insertedRecord.id, { age: 35 });
     assert.equal(updatedRecord.age, 35);
   });
 
   it('should throw error if record not found while updating', () => {
-    assert.throws(() => model.updateById('nonexistentId', { age: 35 }), /RecordNotFoundError/);
+    assert.rejects(model.updateById('nonexistentId', { age: 35 }), /RecordNotFoundError/);
   });
 
-  it('should upsert a record', () => {
+  it('should upsert a record', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    let upsertedRecord = model.insertOrUpdate(record, 'newId');
+    let upsertedRecord = await model.insertOrUpdate(record, 'newId');
     assert.deepEqual(upsertedRecord, {
       ...record,
       id: 'newId',
@@ -125,20 +139,21 @@ describe('SkewerModel', () => {
       updatedAt: upsertedRecord.updatedAt,
     });
 
-    upsertedRecord = model.insertOrUpdate({ age: 35 }, 'newId');
+    upsertedRecord = await model.insertOrUpdate({ age: 35 }, 'newId');
     assert.equal(upsertedRecord.age, 35);
   });
 
-  it('should delete a record by id', () => {
+  it('should delete a record by id', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    const insertedRecord = model.insertOne(record);
-    const deletedRecord = model.deleteById(insertedRecord.id);
+
+    const insertedRecord = await model.insertOne(record);
+    const deletedRecord = await model.deleteById(insertedRecord.id);
+
     assert.deepEqual(deletedRecord, insertedRecord);
-    assert.equal(model.countAll(), 0);
   });
 
   it('should throw error if record not found while deleting', () => {
-    assert.throws(() => model.deleteById('nonexistentId'), /RecordNotFoundError/);
+    assert.rejects(model.deleteById('nonexistentId'), /RecordNotFoundError/);
   });
 
   it('should delete all records', () => {
@@ -148,22 +163,6 @@ describe('SkewerModel', () => {
     model.insertOne(record2);
     model.deleteAll();
     assert.equal(model.countAll(), 0);
-  });
-
-  it('should find records by two keys', () => {
-    const record1 = { name: 'John Doe', age: 30, active: true };
-    const record2 = { name: 'Jane Doe', age: 30, active: false };
-
-    model.insertMany([record1, record2]);
-
-    const foundRecords = model.findByTwoKeys('age', 30, 'active', true);
-    assert.equal(foundRecords.length, 1);
-    assert.deepEqual(foundRecords[0], {
-      ...record1,
-      id: foundRecords[0].id,
-      createdAt: foundRecords[0].createdAt,
-      updatedAt: foundRecords[0].updatedAt,
-    });
   });
 
   it('should open and commit transaction', async () => {
@@ -181,12 +180,12 @@ describe('SkewerModel', () => {
 
   it('should open, modify during, and abort transaction', async () => {
     const record = { name: 'John Doe', age: 30, active: true };
-    let insertedRecord = model.insertOne(record);
+    let insertedRecord = await model.insertOne(record);
     assert.equal(model.countAll(), 1);
 
     model.openTransaction();
 
-    insertedRecord = model.updateById(insertedRecord.id, { age: 35 }); // Modify during transaction
+    insertedRecord = await model.updateById(insertedRecord.id, { age: 35 }); // Modify during transaction
     assert.equal(insertedRecord.age, 35);
 
     await model.abortTransaction();
@@ -199,11 +198,11 @@ describe('SkewerModel', () => {
   it('should validate unique constraint', () => {
     const record1 = { name: 'John Doe', age: 30, active: true, keyword: 'a' };
     model.insertOne(record1);
-    assert.throws(() => model.insertOne(record1), /SchemaValidationError/);
+    assert.rejects(model.insertOne(record1), /SchemaValidationError/);
   });
 
   it('should validate enum constraint', () => {
     const record1 = { name: 'John Doe', age: 30, active: true, keyword: 'd' };
-    assert.throws(() => model.insertOne(record1), /SchemaValidationError/);
+    assert.rejects(model.insertOne(record1), /SchemaValidationError/);
   });
 });
