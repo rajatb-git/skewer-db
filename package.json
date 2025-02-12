@@ -11,9 +11,9 @@
     "node": ">=16.0.0"
   },
   "scripts": {
-    "test": "rimraf test_storage && mocha",
+    "test": "rm -rf test_storage && mocha",
     "coverage": "nyc npm run test",
-    "clean": "rimraf dist",
+    "clean": "rm -rf dist",
     "prebuild": "npm run clean",
     "build": "tsc",
     "lint": "eslint src/**/*.ts",
