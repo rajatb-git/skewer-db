@@ -1,7 +1,8 @@
 import { IUser, UserModel } from './UserModel';
 
-(function () {
+(async function () {
   const userModel = UserModel();
+  await userModel.initialize();
   const sampleUser: IUser = { userId: 'jd', name: 'J Doe' };
 
   console.log(userModel.insertOne(sampleUser));

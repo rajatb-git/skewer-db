@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3 - 2025/02/12
+- Random bug fixes
+- updated documentation
+- moving from npm to pnpm for better performance
+
 ## 1.0.2 - 2025/01/05
 - New icon for skewer db added in docs
 - Updated readme

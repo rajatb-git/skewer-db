@@ -28,16 +28,14 @@ $ npm i --save skewer-db
 
 ### 1. Define Your Schema and Model
 ```ts
-import { ISkewerModel, SkewerModel, SchemaType } from 'skewer-db';
+import { ISkewerModel, SchemaType, SkewerModel } from "skewer-db";
 
 export interface IUser {
-  userId: string;
   name: string;
 }
 
 export const UserSchema: SchemaType = {
-  userId: { type: String, required: true, unique: true },
-  name: { type: String, required: true, index: true },
+  name: { type: String, required: true },
 };
 
 export interface IUserModel extends IUser, ISkewerModel {}
@@ -50,7 +48,7 @@ export const UserModel = () => new SkewerModel<IUserModel>('users', UserSchema);
 import UserModel from './user-model'; // Import your model
 
 const userModel = UserModel();
-const record = { userId: 'jd', name: 'J Doe' };
+userModel.initialize();
 
 try {
   const newRecord = userModel.insertOne(record);
@@ -73,9 +71,6 @@ try {
   const allUsers = userModel.getAllRecords()
   console.log(allUsers)
   // Expected Output: An array with the user objects
-
-
-
 } catch (error) {
   console.error(error.message);
 }
@@ -85,16 +80,15 @@ try {
 90% of existing test cases have been generated using LLM models
 
 ## Available methods
-| **Method**                                | **Description**                                       |
-| ----------------------------------------- | ----------------------------------------------------- |
-| getAllRecords()                           | Retrieves all records from the collection.            |
-| findById(id)                              | Retrieves a record by its ID.                         |
-| findByKey(key, value)                     | Retrieves records matching a specific key-value pair. |
-| findByTwoKeys(key1, value1, key2, value2) | Retrieves records matching two key-value pairs.       |
-| insertOne(record)                         | Inserts a single record.                              |
-| insertMany(records)                       | Inserts multiple records.                             |
-| updateById(id, updates)                   | Updates a record by its ID.                           |
-| insertOrUpdate(record)                    | Updates an existing record or inserts a new one.      |
-| deleteById(id)                            | Deletes a record by its ID.                           |
-| deleteAll()                               | Deletes all records from the collection.              |
-| validateSchema(record)                    | Validates a record against the schema.                |
+| **Method**              | **Description**                                                        |
+| ----------------------- | ---------------------------------------------------------------------- |
+| getAllRecords()         | Retrieves all records from the collection.                             |
+| findById(id)            | Retrieves a record by its ID.                                          |
+| find(searchObject)      | Locates all records that match the search parameters (case-sensitive). |
+| insertOne(record)       | Inserts a single record.                                               |
+| insertMany(records)     | Inserts multiple records.                                              |
+| updateById(id, updates) | Updates a record by its ID.                                            |
+| insertOrUpdate(record)  | Updates an existing record or inserts a new one.                       |
+| deleteById(id)          | Deletes a record by its ID.                                            |
+| deleteAll()             | Deletes all records from the collection.                               |
+| validateSchema(record)  | Validates a record against the schema.                                 |
