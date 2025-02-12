@@ -4,6 +4,7 @@ import { SchemaValidationError, RecordNotFoundError, FileLoadError, DuplicateIdE
 import { DataCacheType, IndexCache, ISkewerModel, SchemaType } from './types';
 import { booleanIsTrue } from './utils';
 import { FileStorage } from './Storage';
+import { CONSTANTS } from './Constants';
 
 export class SkewerModel<T extends ISkewerModel> {
   private schema: SchemaType;
@@ -118,7 +119,8 @@ export class SkewerModel<T extends ISkewerModel> {
     Object.keys(record).forEach((recordKey) => {
       const recordValue = record[recordKey];
 
-      if (this.schema[recordKey].unique || this.schema[recordKey].index) {
+      if (CONSTANTS.ignoredDBRecordKeys.includes(recordKey)) {
+      } else if (this.schema[recordKey].unique || this.schema[recordKey].index) {
         if (!this.indexCache[recordKey] || !this.indexCache[recordKey][recordValue]) {
           this.indexCache[recordKey] = { [recordValue]: [] };
         }
@@ -143,7 +145,8 @@ export class SkewerModel<T extends ISkewerModel> {
     Object.keys(newRecord).forEach((recordKey) => {
       const recordValue = newRecord[recordKey];
 
-      if (this.schema[recordKey].unique || this.schema[recordKey].index) {
+      if (CONSTANTS.ignoredDBRecordKeys.includes(recordKey)) {
+      } else if (this.schema[recordKey].unique || this.schema[recordKey].index) {
         if (!this.indexCache[recordKey]) {
           this.indexCache[recordKey] = { [recordValue]: [] };
         }
@@ -166,26 +169,22 @@ export class SkewerModel<T extends ISkewerModel> {
    * @private
    * @returns void
    */
-  private deleteInIndex(oldRecord: any, id: string): void {
+  private deleteInIndex(oldRecord: any, deleteId: string): void {
     this.isIndexDirty = true;
-    const tempOldRecord = { ...oldRecord };
 
-    delete tempOldRecord.id;
-    delete tempOldRecord.createdAt;
-    delete tempOldRecord.updatedAt;
+    Object.keys(oldRecord).forEach((recordKey) => {
+      const recordValue = oldRecord[recordKey];
 
-    Object.keys(tempOldRecord).forEach((recordKey) => {
-      const recordValue = tempOldRecord[recordKey];
-
-      if (this.schema[recordKey].unique || this.schema[recordKey].index) {
+      if (CONSTANTS.ignoredDBRecordKeys.includes(recordKey)) {
+      } else if (this.schema[recordKey].unique || this.schema[recordKey].index) {
         if (!this.indexCache[recordKey]) {
           this.indexCache[recordKey] = { [recordValue]: [] };
         }
 
         // locates the index for a field with the old value and then removes the record id from the id array
-        this.indexCache[recordKey][tempOldRecord[recordKey]] = this.indexCache[recordKey][
-          tempOldRecord[recordKey]
-        ].filter((x) => x !== id);
+        this.indexCache[recordKey][oldRecord[recordKey]] = this.indexCache[recordKey][oldRecord[recordKey]].filter(
+          (x) => x !== deleteId
+        );
       }
     });
   }
@@ -194,7 +193,7 @@ export class SkewerModel<T extends ISkewerModel> {
   /**
    * @returns Promise
    */
-  async initialize(): Promise<void> {
+  async initialize(): Promise<SkewerModel<T>> {
     if (!(await FileStorage.exists(this.basePath))) {
       await FileStorage.mkdir(this.basePath);
     }
@@ -209,7 +208,9 @@ export class SkewerModel<T extends ISkewerModel> {
       await FileStorage.write(`${this.path}_index.json`, '{}');
     }
 
-    this.loadFile();
+    await this.loadFile();
+
+    return this;
   }
 
   /**
@@ -323,9 +324,12 @@ export class SkewerModel<T extends ISkewerModel> {
 
     this.validateSchema(record);
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _, ...strippedRecord } = record;
+
     const newId = id || randomUUID();
 
-    this.addToIndex(record, newId);
+    this.addToIndex(strippedRecord, newId);
 
     record.id = newId;
     record.createdAt = new Date().toISOString();
@@ -381,14 +385,12 @@ export class SkewerModel<T extends ISkewerModel> {
     }
 
     // in case id or created at fields are passed delete them
-    delete newRecord.id;
-    delete newRecord.createdAt;
-    delete newRecord.updatedAt;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id, createdAt, updatedAt, ...strippedNewRecord } = newRecord;
 
-    this.updateInIndex(oldRecord, newRecord, oldRecord.id);
+    this.updateInIndex(oldRecord, strippedNewRecord, oldRecord.id);
 
-    const formedNewRecord = { ...oldRecord, ...newRecord, updatedAt: new Date().toISOString() };
-
+    const formedNewRecord = { ...oldRecord, ...strippedNewRecord, updatedAt: new Date().toISOString() };
     this.validateSchema(formedNewRecord, true);
 
     this.dataCache[recordId] = formedNewRecord;
