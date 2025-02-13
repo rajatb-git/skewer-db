@@ -16,24 +16,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
       - run: pnpm i
 
   publish-npm:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install pnpm
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+
+      - name: Setup node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
           registry-url: https://registry.npmjs.org/
-      - run: pnpm i
-      - run: pnpm publish
+
+      - name: Install Dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm Build
+
+      - name: Publish
+        run: pnpm publish --no-git-checks
         env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
